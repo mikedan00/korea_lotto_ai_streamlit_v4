@@ -83,8 +83,16 @@ class AppConfig:
             ticket_price=get_int("TICKET_PRICE", 1000),
             llm_engine=get_setting("LLM_ENGINE", "hf_api"),
             hf_token=get_setting("HF_TOKEN", ""),
-            hf_router_model=get_setting("HF_ROUTER_MODEL", "google/gemma-4-26B-A4B-it:deepinfra"),
-            hf_model_candidates=get_setting("HF_MODEL_CANDIDATES", "google/gemma-4-26B-A4B-it:deepinfra,google/gemma-4-26B-A4B-it:novita,google/gemma-4-31B-it:deepinfra,google/gemma-4-31B-it:together,Qwen/Qwen3.5-9B:together,Qwen/Qwen2.5-7B-Instruct:together"),
+            # HF_MODEL_ID도 허용합니다. 기존 배포본은 HF_ROUTER_MODEL만 읽었기 때문에
+            # Secrets에 HF_MODEL_ID만 넣으면 사용자가 지정한 모델이 무시될 수 있었습니다.
+            hf_router_model=get_setting(
+                "HF_ROUTER_MODEL",
+                get_setting("HF_MODEL_ID", "google/gemma-4-26B-A4B-it:deepinfra"),
+            ),
+            hf_model_candidates=get_setting(
+                "HF_MODEL_CANDIDATES",
+                "google/gemma-4-26B-A4B-it:deepinfra,google/gemma-4-26B-A4B-it:novita,google/gemma-4-31B-it:deepinfra,google/gemma-4-31B-it:together,Qwen/Qwen3.5-9B:together,Qwen/Qwen2.5-7B-Instruct:together",
+            ),
             hf_max_tokens=get_int("HF_MAX_TOKENS", 1400),
             hf_temperature=get_float("HF_TEMPERATURE", 0.2),
             hf_timeout_connect=get_int("HF_TIMEOUT_CONNECT", 10),
@@ -93,9 +101,29 @@ class AppConfig:
         )
 
     def model_candidates(self) -> List[str]:
-        ordered = []
-        for item in [self.hf_router_model] + self.hf_model_candidates.split(","):
-            model = item.strip()
+        """Return ordered HF Router model candidates.
+
+        Supports both provider-suffixed names, e.g.
+        `google/gemma-4-26B-A4B-it:deepinfra`, and bare model ids from
+        HF_MODEL_ID, e.g. `google/gemma-4-26B-A4B-it`. For bare ids we add
+        `:fastest` and common provider suffix variants after the original id.
+        """
+        ordered: List[str] = []
+
+        def add(model: str) -> None:
+            model = model.strip()
             if model and model not in ordered:
                 ordered.append(model)
+
+        raw_items = [self.hf_router_model] + self.hf_model_candidates.split(",")
+        for item in raw_items:
+            model = item.strip()
+            if not model:
+                continue
+            add(model)
+            # If the last path segment has no provider/policy suffix, add safe suffix variants.
+            last_segment = model.rsplit("/", 1)[-1]
+            if ":" not in last_segment:
+                for suffix in [":fastest", ":deepinfra", ":novita", ":together", ":preferred"]:
+                    add(model + suffix)
         return ordered

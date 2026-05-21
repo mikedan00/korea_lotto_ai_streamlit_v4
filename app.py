@@ -12,7 +12,7 @@ from src.lotto_engine import LottoStatEngine, load_lotto_records, result_to_dict
 from src.llm_engine import LLMAnalyzer
 
 st.set_page_config(
-    page_title="Korea Lotto AI Predictor v4",
+    page_title="Korea Lotto AI Predictor v4.1",
     page_icon="🎰",
     layout="wide",
 )
@@ -90,7 +90,7 @@ def _render_result(result):
 def main():
     cfg = AppConfig.from_env()
 
-    st.title("🎰 한국 로또 AI 예측 시스템 v4")
+    st.title("🎰 한국 로또 AI 예측 시스템 v4.1")
     st.caption("VS Code 로컬 실행 + Streamlit Cloud 배포 + Hugging Face Router LLM 분석 지원")
 
     with st.sidebar:
@@ -113,7 +113,27 @@ def main():
     path = None if raw is not None else csv_path
 
     run = st.button("🚀 백테스트 + 예측 실행", type="primary", use_container_width=True)
-    if not run:
+
+    # Streamlit 버튼은 클릭할 때마다 전체 스크립트를 재실행합니다.
+    # 기존 v4는 LLM 버튼을 누르는 순간 첫 번째 실행 버튼 값이 False가 되어
+    # 결과 화면까지 도달하지 못했습니다. 결과를 session_state에 저장해 이 문제를 해결합니다.
+    if run:
+        try:
+            with st.spinner("CSV 로딩 및 롤링 백테스트 실행 중..."):
+                key = f"raw:{len(raw)}" if raw is not None else f"path:{path}"
+                records, result = _run_prediction_cached(
+                    key, raw, path, int(min_train), int(backtest_draws), int(candidate_count), int(seed)
+                )
+            st.session_state["last_records"] = records
+            st.session_state["last_result"] = result
+            st.session_state["last_source_label"] = f"업로드 CSV {len(raw)} bytes" if raw is not None else str(path)
+            st.success(f"데이터 로드 완료: {len(records)}회차 / 마지막 회차: {records[-1].draw}")
+        except Exception as e:
+            st.error(f"실행 오류: {e}")
+            st.exception(e)
+            return
+
+    if "last_result" not in st.session_state:
         st.info("왼쪽에서 CSV를 업로드하거나 경로를 지정한 뒤 실행하세요.")
         st.markdown(
             """
@@ -124,42 +144,57 @@ def main():
         )
         return
 
-    try:
-        with st.spinner("CSV 로딩 및 롤링 백테스트 실행 중..."):
-            key = f"raw:{len(raw)}" if raw is not None else f"path:{path}"
-            records, result = _run_prediction_cached(key, raw, path, int(min_train), int(backtest_draws), int(candidate_count), int(seed))
+    records = st.session_state.get("last_records", [])
+    result = st.session_state["last_result"]
+    if records:
+        st.caption(f"현재 표시 중인 결과: {st.session_state.get('last_source_label', '')} / {len(records)}회차")
+    _render_result(result)
 
-        st.success(f"데이터 로드 완료: {len(records)}회차 / 마지막 회차: {records[-1].draw}")
-        _render_result(result)
-
-        st.markdown("### 🤖 LLM AI 추가 분석")
-        user_note = st.text_area("AI에게 추가로 요청할 분석 조건", placeholder="예: 너무 낮은 번호에 몰리지 않게 해줘 / 최근 30회 흐름을 더 중시해줘")
-        if st.button("🤖 HF LLM으로 추가 분석", use_container_width=True):
-            analyzer = LLMAnalyzer(cfg)
+    st.markdown("### 🤖 LLM AI 추가 분석")
+    analyzer = LLMAnalyzer(cfg)
+    with st.expander("LLM 연결 진단", expanded=False):
+        st.write(f"LLM_ENGINE: `{cfg.llm_engine}`")
+        st.write(f"HF_TOKEN: {'설정됨 ✅' if cfg.hf_token else '없음 ❌'}")
+        st.write("모델 후보:")
+        st.code("\n".join(cfg.model_candidates()[:12]))
+        if st.button("🔌 HF 연결 테스트", use_container_width=True):
             if not analyzer.available():
-                st.error("HF_TOKEN이 없거나 LLM_ENGINE이 hf_api가 아닙니다. .env 또는 Streamlit Secrets를 확인하세요.")
+                st.error("HF_TOKEN이 없거나 LLM_ENGINE이 hf_api가 아닙니다.")
             else:
-                with st.spinner("Hugging Face Router API 호출 중..."):
-                    llm_resp = analyzer.analyze(result, user_note=user_note)
-                if llm_resp.ok:
-                    st.success(f"LLM 분석 완료: {llm_resp.model}")
-                    st.markdown(llm_resp.content)
+                with st.spinner("HF Router 연결 테스트 중..."):
+                    test_resp = analyzer.test_connection()
+                if test_resp.ok:
+                    st.success(f"연결 성공: {test_resp.model}")
+                    st.write(test_resp.content)
                 else:
-                    st.error("LLM 호출 실패")
-                    st.code(llm_resp.error)
+                    st.error("연결 실패")
+                    st.code(test_resp.error)
 
-        st.markdown("### 💾 결과 다운로드")
-        result_json = result_to_dict(result)
-        st.download_button(
-            "prediction_result.json 다운로드",
-            data=pd.Series(result_json).to_json(force_ascii=False, indent=2),
-            file_name="prediction_result.json",
-            mime="application/json",
-        )
+    user_note = st.text_area(
+        "AI에게 추가로 요청할 분석 조건",
+        placeholder="예: 너무 낮은 번호에 몰리지 않게 해줘 / 최근 30회 흐름을 더 중시해줘",
+    )
+    if st.button("🤖 HF LLM으로 추가 분석", use_container_width=True):
+        if not analyzer.available():
+            st.error("HF_TOKEN이 없거나 LLM_ENGINE이 hf_api가 아닙니다. .env 또는 Streamlit Secrets를 확인하세요.")
+        else:
+            with st.spinner("Hugging Face Router API 호출 중..."):
+                llm_resp = analyzer.analyze(result, user_note=user_note)
+            if llm_resp.ok:
+                st.success(f"LLM 분석 완료: {llm_resp.model}")
+                st.markdown(llm_resp.content)
+            else:
+                st.error("LLM 호출 실패")
+                st.code(llm_resp.error)
 
-    except Exception as e:
-        st.error(f"실행 오류: {e}")
-        st.exception(e)
+    st.markdown("### 💾 결과 다운로드")
+    result_json = result_to_dict(result)
+    st.download_button(
+        "prediction_result.json 다운로드",
+        data=pd.Series(result_json).to_json(force_ascii=False, indent=2),
+        file_name="prediction_result.json",
+        mime="application/json",
+    )
 
     st.divider()
     st.caption("주의: 로또는 무작위 확률 게임입니다. 본 앱은 과거 데이터 기반 후보 생성 도구이며 당첨 또는 수익을 보장하지 않습니다.")

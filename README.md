@@ -1,3 +1,48 @@
+# Korea Lotto AI Predictor v4.1
+
+Streamlit + VS Code + Hugging Face Router 기반 한국 로또 통계/백테스트/LLM 분석 앱입니다.
+
+## v4.1 수정 사항
+
+- Streamlit 버튼 rerun 문제 수정: 예측 결과를 `st.session_state`에 저장하여 `HF LLM으로 추가 분석` 버튼이 정상 작동합니다.
+- `HF_MODEL_ID` 별칭 지원: Secrets에 `HF_MODEL_ID`만 넣어도 모델 후보에 반영됩니다.
+- HF Router 연결 테스트 버튼 추가
+- 모델 후보/에러 표시 개선
+- `stream=false` 명시 및 HTTP 오류 메시지 확대
+
+## Streamlit Cloud Secrets 예시
+
+```toml
+LLM_ENGINE = "hf_api"
+HF_TOKEN = "hf_XXXXXXXXXX"
+HF_MODEL_ID = "google/gemma-4-26B-A4B-it"
+HF_ROUTER_MODEL = "google/gemma-4-26B-A4B-it:deepinfra"
+HF_MODEL_CANDIDATES = "google/gemma-4-26B-A4B-it:deepinfra,google/gemma-4-26B-A4B-it:novita,google/gemma-4-31B-it:deepinfra,google/gemma-4-31B-it:together,Qwen/Qwen3.5-9B:together,Qwen/Qwen2.5-7B-Instruct:together"
+HF_MAX_TOKENS = "1400"
+HF_TEMPERATURE = "0.2"
+HF_TIMEOUT_CONNECT = "10"
+HF_TIMEOUT_READ = "120"
+HF_MAX_RETRIES = "3"
+```
+
+## 로컬 실행
+
+```powershell
+python -m venv venv
+.\venv\Scripts\activate
+pip install -r requirements.txt
+copy .env.example .env
+notepad .env
+streamlit run app.py
+```
+
+## 주의
+
+- 실제 `HF_TOKEN`은 GitHub에 올리지 마세요.
+- 로또는 무작위 확률 게임이며, 본 앱은 통계/엔터테인먼트 목적의 후보 생성 도구입니다. 당첨을 보장하지 않습니다.
+
+---
+
 # Korea Lotto AI Predictor v4
 
 한국 로또 6/45 CSV 데이터를 기반으로 **롤링 백테스트 → 전략별 가중치 최적화 → 후보 조합 생성 → Hugging Face Router LLM 추가 분석**까지 실행하는 VS Code / Streamlit 배포형 프로젝트입니다.

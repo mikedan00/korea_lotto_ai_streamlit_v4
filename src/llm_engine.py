@@ -73,6 +73,41 @@ class LLMAnalyzer:
 5. 주의사항
 """.strip()
 
+    def test_connection(self) -> LLMResponse:
+        """Small HF Router smoke test for Streamlit diagnostics."""
+        if self.config.llm_engine.lower() != "hf_api":
+            return LLMResponse(False, "", "", f"지원하지 않는 LLM_ENGINE: {self.config.llm_engine}")
+        if not self.config.hf_token:
+            return LLMResponse(False, "", "", "HF_TOKEN이 설정되어 있지 않습니다.")
+
+        last_error = ""
+        for model in self.config.model_candidates():
+            try:
+                payload = {
+                    "model": model,
+                    "stream": False,
+                    "messages": [
+                        {"role": "user", "content": "한국어로 '연결 정상'이라고만 답하세요."}
+                    ],
+                    "max_tokens": 32,
+                    "temperature": 0.0,
+                }
+                resp = requests.post(
+                    HF_CHAT_COMPLETIONS_URL,
+                    headers=self._headers(),
+                    json=payload,
+                    timeout=(self.config.hf_timeout_connect, min(45, self.config.hf_timeout_read)),
+                )
+                if resp.status_code >= 400:
+                    last_error = f"{model} HTTP {resp.status_code}: {resp.text[:1200]}"
+                    continue
+                data = resp.json()
+                content = data.get("choices", [{}])[0].get("message", {}).get("content", "")
+                return LLMResponse(True, model, content or "연결 정상")
+            except Exception as e:
+                last_error = f"{model}: {type(e).__name__}: {e}"
+        return LLMResponse(False, "", "", last_error or "모든 HF 모델 후보 호출에 실패했습니다.")
+
     def analyze(self, result: PredictionResult, user_note: str = "") -> LLMResponse:
         if self.config.llm_engine.lower() != "hf_api":
             return LLMResponse(False, "", "", f"지원하지 않는 LLM_ENGINE: {self.config.llm_engine}")
@@ -86,6 +121,7 @@ class LLMAnalyzer:
                 try:
                     payload = {
                         "model": model,
+                        "stream": False,
                         "messages": [
                             {
                                 "role": "system",
@@ -103,7 +139,7 @@ class LLMAnalyzer:
                         timeout=(self.config.hf_timeout_connect, self.config.hf_timeout_read),
                     )
                     if resp.status_code >= 400:
-                        last_error = f"{model} HTTP {resp.status_code}: {resp.text[:500]}"
+                        last_error = f"{model} HTTP {resp.status_code}: {resp.text[:1200]}"
                         time.sleep(0.8 * (attempt + 1))
                         continue
                     data = resp.json()
